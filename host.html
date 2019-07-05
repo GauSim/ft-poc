@@ -1,0 +1,291 @@
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.11/lodash.min.js"
+  integrity="sha256-7/yoZS3548fXSRXqc/xYzjsmuW3sFKzuvOCHd06Pmps=" crossorigin="anonymous"></script>
+<link href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet"
+  integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+<style>
+  body {
+    background-color: white;
+  }
+
+  iframe {
+    margin: 0 auto;
+    border: 1px solid red;
+    width: 500px;
+    height: 500px;
+    overflow: hidden;
+  }
+</style>
+<div id="trigger"><span> trigger flow >>>></span> <button class="btn btn-primary" onclick="triggerflow()">
+    /create-post</button></div>
+<div id="iframe-here"></div>
+
+<hr>
+
+<div>
+  Host Context:
+  <pre id="context"></pre>
+  <hr>
+</div>
+
+<div style="display: none">
+  Host Events:
+  <pre id="msg"></pre>
+  <hr>
+</div>
+
+<script>
+  const flowSteps = [
+    {
+      name: 'flow-step1',
+      type: 'ui',
+      destination: {
+        uri: 'apps/flow-step1.html',
+        useContext: false,
+        type: 'get'
+      },
+      contextIN: {
+        required: [
+          'global.userName'
+        ],
+        properties: {
+          'global.userName': { type: 'string' }
+        }
+      },
+      contextOUT: {
+        required: [],
+        properties: {
+          'flow-step1-result': { type: 'string' }
+        }
+      }
+    },
+    {
+      name: 'flow-step2',
+      destination: {
+        uri: 'apps/flow-step2.html',
+        useContext: false,
+        type: 'get'
+      },
+      type: 'ui',
+      contextIN: {
+        required: [
+          'global.userName',
+          'flow-step1-result' // step2 depending on step1
+        ],
+        properties: {
+          'global.userName': { type: 'string' },
+          'flow-step1-result': { type: 'string' }
+        }
+      },
+      contextOUT: {
+        required: [],
+        properties: {
+          'flow-step2-result': { type: 'string' }
+        }
+      }
+    },
+    {
+      name: 'create-post',
+      type: 'ui',
+      destination: {
+        uri: 'apps/create-post.html',
+        useContext: false,
+        type: 'get'
+      },
+      contextIN: {
+        required: [
+          'global.userName',
+          'global.userId'
+        ],
+        properties: {
+          'global.userName': { type: 'string' },
+          'global.userId': { type: 'number' },
+          'flow-step1-result': { type: 'string', mapTo: 'title' },
+          'flow-step2-result': { type: 'string', mapTo: 'body' }
+        }
+      },
+      contextOUT: {
+        required: [],
+        properties: {
+          'postId': { type: 'string' },
+          'demoData': { type: 'object' }
+        }
+      }
+    },
+    {
+      name: 'headless-step',
+      destination: {
+        uri: 'https://jsonplaceholder.typicode.com/posts/<%= myFancyId %>', // we have to check with SecOps on tmpls :)
+        useContext: true, // allowing passing [contextIN] data to uri, as body, as headers
+        type: 'get'
+      },
+      type: 'headless', // headless | ui | approval?
+      contextIN: {
+        required: [
+          'postId'
+        ],
+        properties: {
+          'postId': { type: 'string', mapTo: 'myFancyId' }
+        }
+      },
+      contextOUT: {
+        required: [],
+        properties: {
+          'post': { type: 'object' }
+        }
+      }
+    }
+  ]
+
+  let flowContext = {
+
+    // read only globals
+    'global': {
+      'userName': 'simon',
+      'userId': 1,
+      'locale': 'de-de',
+    },
+
+    // context provided by flow trigger 
+    'trigger': {}
+
+
+    // ... context filled by apps
+
+  };
+
+
+  let currentapp;
+  let iframe
+  document.getElementById('context').innerHTML = JSON.stringify(flowContext, null, 2);
+
+  function onAppDone(outcontext) {
+
+    // save ctx
+    flowContext = {
+      ...flowContext,
+
+      ...Object.keys(currentapp.contextOUT.properties)
+        .reduce((ctx, key) => {
+
+          if (key.includes('global')) {
+            throw new Error('global context is read only');
+          }
+
+          const property = currentapp.contextOUT.properties[key];
+          const contextKey = property && property.mapTo ? property.mapTo : key;
+
+          return { ...ctx, [contextKey]: outcontext[key] }
+        }, {})
+
+    };
+
+    const idx = flowSteps.indexOf(currentapp);
+    const nextApp = flowSteps[idx + 1];
+
+    if (nextApp)
+      run(nextApp);
+    else
+      close();
+
+    document.getElementById('context').innerHTML = JSON.stringify(flowContext, null, 2)
+  }
+
+  function getAppContext(app) {
+
+    function getValue(key, throwOnMissing) {
+      if (throwOnMissing && key.indexOf('global.') !== 0 && !flowContext.hasOwnProperty(key)) {
+        throw new Error(`[contextIN] requirements can not be fullfilled for [${app.name}] for [${key}]`);
+      }
+      return flowContext[key];
+    }
+
+    function getValues(keys, throwOnMissing) {
+      return keys
+        .reduce((ctx, key) => {
+
+          const property = app.contextIN.properties[key];
+          const contextKey = property && property.mapTo ? property.mapTo : key;
+
+          return { ...ctx, [contextKey]: getValue(key, throwOnMissing) };
+
+        }, { global: flowContext.global })
+    }
+
+    return {
+      ...getValues(app.contextIN.required, true),
+      ...getValues(Object.keys(app.contextIN.properties), true)
+    }
+  }
+
+  window.addEventListener('message', (ev) => {
+    document.getElementById('msg').innerHTML += `GOT | [${currentapp.name}] => ${JSON.stringify(ev.data, null, 2)} \n`
+
+    if (ev.data.type === 'in-context') {
+
+      // prepare context for app
+      const appContext = getAppContext(currentapp)
+
+      send({ type: 'in-context', payload: appContext });
+    }
+
+    if (ev.data.type === 'out-context') {
+      onAppDone(ev.data.payload);
+    }
+
+  });
+
+  function send(data) {
+    document.getElementById('msg').innerHTML += `SEND | [${currentapp.name}] => ${JSON.stringify(data, null, 2)} \n`
+    const iframeWindow = iframe.contentWindow;
+    iframeWindow.postMessage(data);
+  }
+
+  // run flow app
+  function run(app) {
+    currentapp = app;
+
+    if (app.type === 'ui') {
+      document.getElementById('iframe-here').innerHTML = `<iframe id="iframe" src="#" frameborder="0"></iframe>`
+      iframe = document.getElementById('iframe');
+      iframe.onload = () => {
+        console.log('app loaded', app.name)
+      }
+      iframe.setAttribute('src', app.destination.uri)
+    }
+
+    if (app.type === 'headless') {
+      // we should backend proxy this :I 
+
+      const ctx = getAppContext(app);
+
+      const uri = app.destination.useContext
+        ? _.template(app.destination.uri)(ctx) // tmpl
+        : app.destination.uri;
+
+      const req = app.destination.type === 'get'
+        ? fetch(uri)
+        : fetch(uri, { method: 'post', body: JSON.stringify(ctx) })
+
+      req
+        .then(response => response.json())
+        .then(json => onAppDone(json))
+    }
+
+  }
+
+  // close flow 
+  function close() {
+    document.getElementById('iframe-here').innerHTML = "";
+  }
+
+  // trigger flow
+  function triggerflow() {
+    
+    document.getElementById('trigger').remove();
+    flowContext.trigger = { name: '/create-post' };
+    document.getElementById('context').innerHTML = JSON.stringify(flowContext, null, 2)
+
+    run(flowSteps[0]);
+  }
+
+</script>

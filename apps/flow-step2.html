@@ -1,0 +1,41 @@
+<link href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet"
+  integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+<button class="btn btn-primary" onclick="done()">done / next</button>
+<h1 id="name"></h1>
+
+<div>this step just says hi</div>
+
+<pre id="msg"></pre>
+
+<script>
+  // avoid some boilerplate 
+  const app = {
+    name: 'flow-step2',
+    color: 'blue'
+  };
+  document.getElementById('name').innerHTML = app.name;
+  document.getElementById('name').style.backgroundColor = app.color;
+
+
+  // actual app logic
+  let appContext = {};
+
+  window.addEventListener('message', (ev) => {
+    document.getElementById('msg').innerHTML += `CTX => ${JSON.stringify(ev.data, null, 2)} \n`;
+    appContext = ev.data.payload;
+  });
+
+  function done() {
+    parent.postMessage({
+      type: 'out-context',
+      payload: { [app.name + '-result']: `hello ${appContext.global.userName} from ${app.name}!` }
+    })
+  }
+
+  function start() {
+    const data = { type: 'in-context', payload: null }
+    parent.postMessage(data);
+  }
+
+  start();
+</script>
