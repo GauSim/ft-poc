@@ -39,7 +39,8 @@
       name: 'flow-step1',
       type: 'ui',
       destination: {
-        uri: 'apps/flow-step1.html',
+        uri: 'flow1/steps/apps/flow-step1.html',
+        version: '1.0.0', // update, add, delete => verison/migration 
         useContext: false,
         type: 'get'
       },
@@ -48,7 +49,7 @@
           'global.userName'
         ],
         properties: {
-          'global.userName': { type: 'string' }
+          'global.userName': { type: 'string', default: 'NOT_SET' }          
         }
       },
       contextOUT: {
